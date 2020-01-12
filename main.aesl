@@ -1,0 +1,244 @@
+<!DOCTYPE aesl-source>
+<network>
+
+
+<!--list of global events-->
+
+
+<!--list of constants-->
+<constant value="100" name="PHYSIOLOGY_TICK"/>
+<constant value="2" name="HEAT_CONSUMPTION_RATE"/>
+<constant value="20" name="ENERGY_CONSUMPTION_RATE"/>
+<constant value="420" name="FOOD_THRESHOLD_UPPER"/>
+<constant value="300" name="FOOD_THRESHOLD_LOWER"/>
+<constant value="610" name="HEAT_THRESHOLD_LOWER"/>
+<constant value="750" name="HEAT_THRESHOLD_UPPER"/>
+<constant value="50" name="ENERGY_INTAKE_PER_SE"/>
+<constant value="50" name="TEMPERATURE_RISE_PER_SE"/>
+<constant value="0" name="ENERGY_FATAL_LIMIT"/>
+<constant value="5000" name="MAX_ENERGY"/>
+<constant value="500" name="SPEED"/>
+<constant value="0" name="TEMPERATURE_FATAL_LIMIT"/>
+<constant value="40" name="MAX_TEMPERATURE"/>
+<constant value="500" name="RANDOM_WALK_TICKS"/>
+<constant value="0" name="MAX_VIEW"/>
+<constant value="3000" name="PERSONAL_SPACE"/>
+<constant value="1" name="STATE_RETREAT"/>
+
+
+<!--show keywords state-->
+<keywords flag="true"/>
+
+
+<!--node thymio-II-->
+<node nodeId="1" name="thymio-II"># Define and initialise variables
+var energy # physiological variable
+var mTemperature # physiological variable
+var alive # 0 = dead, other values = alive
+var state = 0
+
+var max_sval # maximum sensor value
+var max_sval_i # index of maximum sensor val
+var i = 0
+
+# Variables to hold motor values
+var mot_l
+var mot_r
+
+# Variables for Braitenberg avoid routine
+var avoid_l[5] = [2, 0, -1, -5, -10] # Links 5 prox sensors to L motor
+var avoid_r[5] = [-10, -5, -2, 0, 2] # Links 5 prox sensors to R motor
+var avoid_shift = 4 # number bits to shift in dot product
+var avoid_offset = SPEED*2/5 # base speed with 0 inputs
+
+
+# Initialize
+callsub initialise_physiology
+callsub reset_leds
+callsub reset_motors
+
+sub initialise_physiology
+	energy = 5000 # initial value for robot's energy
+	mTemperature = 20
+	alive = 1 # robot is alive
+	timer.period[0] = PHYSIOLOGY_TICK # millisecond timer
+
+sub reset_leds
+	call leds.top(0,0,0) # no light		
+
+sub reset_motors
+	motor.left.target = 0
+	motor.right.target = 0
+
+# Timer0 controls physiology update
+onevent timer0
+	if alive!=0 then
+		callsub energy_decay
+		callsub heat_loss
+	end
+	
+# Energy variable goes down slowly over time if the robot does not eat
+sub energy_decay
+	energy -= ENERGY_CONSUMPTION_RATE/(1000/PHYSIOLOGY_TICK)
+	if energy &lt; 0 then
+		energy = 0
+	end
+	if energy &lt;= ENERGY_FATAL_LIMIT then
+		callsub death
+	end
+
+# Temperature variable goes down slowly over time if the robot does not eat
+sub heat_loss
+	mTemperature -= HEAT_CONSUMPTION_RATE/(1000/PHYSIOLOGY_TICK)
+	if mTemperature &lt; 0 then
+		mTemperature = 0
+	end
+	if mTemperature &lt;= TEMPERATURE_FATAL_LIMIT then
+		callsub death
+	end
+		
+# Robot dies - stop timers, stop motors, show death by turning top LED red
+sub death
+	alive = 0
+	call leds.top(32,0,0) # red = dead
+	timer.period[0] = 0 # stop timer
+	callsub reset_motors
+
+	
+# Proximity sensor events control behavior selection
+onevent prox
+	if alive!=0 then
+		callsub ACTION_SELECTION
+	end
+
+sub ACTION_SELECTION
+	# Robot behaviour controller goes here
+	# Motivation architecture
+	
+	callsub reset_motors
+	callsub reset_leds
+	
+	callsub behaviour_explore
+	callsub behaviour_retreat
+	callsub behaviour_avoid
+	callsub behaviour_look_for_food
+	callsub behaviour_look_for_heat
+#
+# Individual behaviours
+#
+
+sub behaviour_explore
+	callsub behaviour_forward
+	timer.period[1] = RANDOM_WALK_TICKS
+return
+		
+sub behaviour_avoid
+	# Use the vector dot product to calculate motor values
+	call math.dot(mot_l, avoid_l, prox.horizontal[0:4], avoid_shift)
+	mot_l += avoid_offset
+	call math.dot(mot_r, avoid_r, prox.horizontal[0:4], avoid_shift)
+	mot_r += avoid_offset
+
+	# If motor values are &amp;lt; -MAX_SPEED or > +MAX_SPEED fix them
+	call math.clamp(mot_l, -SPEED, mot_l, SPEED)
+	call math.clamp(mot_r, -SPEED, mot_r, SPEED)
+
+	# Write calculated motor values to Thymio variables to run motors
+	motor.left.target = mot_l
+	motor.right.target = mot_r
+
+		
+sub behaviour_look_for_food
+	if prox.ground.delta[0] > FOOD_THRESHOLD_LOWER and prox.ground.delta[0] &lt; FOOD_THRESHOLD_UPPER or prox.ground.delta[1] > FOOD_THRESHOLD_LOWER and prox.ground.delta[1] &lt; FOOD_THRESHOLD_UPPER then 
+		callsub behaviour_eat	
+	else
+		callsub behaviour_explore	
+	end	
+	
+sub behaviour_look_for_heat
+	if prox.ground.delta[0] > HEAT_THRESHOLD_LOWER and prox.ground.delta[0] &lt; HEAT_THRESHOLD_UPPER or prox.ground.delta[1] > HEAT_THRESHOLD_LOWER and prox.ground.delta[1] &lt; HEAT_THRESHOLD_UPPER then
+		callsub behaviour_warmup
+	else
+		callsub behaviour_explore	
+	end
+	
+sub behaviour_eat
+	if prox.ground.delta[0] > FOOD_THRESHOLD_LOWER and prox.ground.delta[0] &lt; FOOD_THRESHOLD_UPPER or prox.ground.delta[1] > FOOD_THRESHOLD_LOWER and prox.ground.delta[1] &lt; FOOD_THRESHOLD_UPPER then
+		callsub reset_motors
+		call leds.top(0,32,0)
+		energy += ENERGY_INTAKE_PER_SE/10 # 10 because called at 10Hz
+		if  energy > MAX_ENERGY then	
+			energy = MAX_ENERGY
+			callsub behaviour_explore
+		end
+	end
+
+sub behaviour_warmup
+	if prox.ground.delta[0] > HEAT_THRESHOLD_LOWER and prox.ground.delta[0] &lt; HEAT_THRESHOLD_UPPER or prox.ground.delta[1] > HEAT_THRESHOLD_LOWER and prox.ground.delta[1] &lt; HEAT_THRESHOLD_UPPER then # food present
+		callsub reset_motors
+		call leds.top(255,126,0)
+		mTemperature += TEMPERATURE_RISE_PER_SE/10
+		callsub reset_motors
+		if  mTemperature > MAX_TEMPERATURE then	
+			mTemperature = MAX_TEMPERATURE
+			callsub behaviour_explore
+		end
+	end
+
+sub behaviour_retreat
+	max_sval = prox.horizontal[0]
+	max_sval_i = 0
+
+	# Loop through the remaining front proximity sensors (1 to 4)
+	for i in 1:4 do
+		if prox.horizontal[i] > max_sval then
+			max_sval = prox.horizontal[i] # record new max val
+			max_sval_i = i # record index of new max val
+		end
+	end
+	if max_sval > PERSONAL_SPACE then
+		state = STATE_RETREAT
+		timer.period[1] = 4000
+	end
+	
+onevent timer1
+	if  state == STATE_RETREAT then
+		callsub behaviour_reverse
+		state = 0
+	else
+		callsub behaviour_rand_turn
+	end
+
+
+#
+# Basic Actuators Behaviours
+#
+sub behaviour_forward
+	motor.left.target += SPEED
+	motor.right.target += SPEED
+		
+sub behaviour_turn_left
+	motor.left.target = -SPEED
+	motor.right.target = SPEED	
+	
+sub behaviour_turn_right
+	motor.left.target = SPEED
+	motor.right.target = -SPEED
+
+sub behaviour_reverse
+	motor.left.target = -SPEED
+	motor.right.target = -SPEED
+
+sub behaviour_rand_turn	
+	call math.rand(i)
+	if  i > -1 then
+		callsub behaviour_turn_right
+	else
+		callsub behaviour_turn_left	
+	end
+	
+
+</node>
+
+
+</network>
