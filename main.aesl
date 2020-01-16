@@ -7,23 +7,23 @@
 
 <!--list of constants-->
 <constant value="100" name="PHYSIOLOGY_TICK"/>
-<constant value="2" name="HEAT_CONSUMPTION_RATE"/>
-<constant value="20" name="ENERGY_CONSUMPTION_RATE"/>
+<constant value="50" name="HEAT_CONSUMPTION_RATE"/>
+<constant value="50" name="ENERGY_CONSUMPTION_RATE"/>
 <constant value="420" name="FOOD_THRESHOLD_UPPER"/>
-<constant value="300" name="FOOD_THRESHOLD_LOWER"/>
+<constant value="320" name="FOOD_THRESHOLD_LOWER"/>
 <constant value="610" name="HEAT_THRESHOLD_LOWER"/>
 <constant value="750" name="HEAT_THRESHOLD_UPPER"/>
-<constant value="50" name="ENERGY_INTAKE_PER_SE"/>
-<constant value="50" name="TEMPERATURE_RISE_PER_SE"/>
+<constant value="200" name="ENERGY_INTAKE_PER_SE"/>
+<constant value="200" name="TEMPERATURE_RISE_PER_SE"/>
 <constant value="0" name="ENERGY_FATAL_LIMIT"/>
-<constant value="5000" name="MAX_ENERGY"/>
+<constant value="9999" name="MAX_ENERGY"/>
+<constant value="9999" name="MAX_TEMPERATURE"/>
 <constant value="500" name="SPEED"/>
 <constant value="0" name="TEMPERATURE_FATAL_LIMIT"/>
-<constant value="40" name="MAX_TEMPERATURE"/>
-<constant value="500" name="RANDOM_WALK_TICKS"/>
+<constant value="1000" name="RANDOM_WALK_TICKS"/>
 <constant value="0" name="MAX_VIEW"/>
 <constant value="3000" name="PERSONAL_SPACE"/>
-<constant value="1" name="STATE_RETREAT"/>
+<constant value="5000" name="ENGERGY_DANGER_LIMIT"/>
 
 
 <!--show keywords state-->
@@ -31,26 +31,32 @@
 
 
 <!--node thymio-II-->
-<node nodeId="1" name="thymio-II"># Define and initialise variables
+<node nodeId="1" name="thymio-II"># Overall metric
+var survival_time
+var overall_wellbeing
+var physiological_balance
+
+# Define and initialise variables
 var energy # physiological variable
-var mTemperature # physiological variable
+var temper # physiological variable
 var alive # 0 = dead, other values = alive
 var state = 0
+var i
 
+# Motivation variables
+var energy_deficit = 0
+var temperature_deficit = 0
+var motivation_hunger
+var motivation_cold
+var stimulus_food = 0
+var stimulus_heat = 0
+
+# Behaviorur dependent variables
+var selected_behaviour
+
+# Actuator variables
 var max_sval # maximum sensor value
 var max_sval_i # index of maximum sensor val
-var i = 0
-
-# Variables to hold motor values
-var mot_l
-var mot_r
-
-# Variables for Braitenberg avoid routine
-var avoid_l[5] = [2, 0, -1, -5, -10] # Links 5 prox sensors to L motor
-var avoid_r[5] = [-10, -5, -2, 0, 2] # Links 5 prox sensors to R motor
-var avoid_shift = 4 # number bits to shift in dot product
-var avoid_offset = SPEED*2/5 # base speed with 0 inputs
-
 
 # Initialize
 callsub initialise_physiology
@@ -58,8 +64,8 @@ callsub reset_leds
 callsub reset_motors
 
 sub initialise_physiology
-	energy = 5000 # initial value for robot's energy
-	mTemperature = 20
+	energy = MAX_ENERGY # initial value for robot's energy
+	temper = MAX_TEMPERATURE
 	alive = 1 # robot is alive
 	timer.period[0] = PHYSIOLOGY_TICK # millisecond timer
 
@@ -87,105 +93,24 @@ sub energy_decay
 		callsub death
 	end
 
-# Temperature variable goes down slowly over time if the robot does not eat
+# Temperature variable goes down slowly over time if the robot does not find heat
 sub heat_loss
-	mTemperature -= HEAT_CONSUMPTION_RATE/(1000/PHYSIOLOGY_TICK)
-	if mTemperature &lt; 0 then
-		mTemperature = 0
+	temper -= HEAT_CONSUMPTION_RATE/(1000/PHYSIOLOGY_TICK)
+	if temper &lt; 0 then
+		temper = 0
 	end
-	if mTemperature &lt;= TEMPERATURE_FATAL_LIMIT then
+	if temper &lt;= TEMPERATURE_FATAL_LIMIT then
 		callsub death
 	end
 		
-# Robot dies - stop timers, stop motors, show death by turning top LED red
 sub death
 	alive = 0
 	call leds.top(32,0,0) # red = dead
 	timer.period[0] = 0 # stop timer
 	callsub reset_motors
-
 	
 # Proximity sensor events control behavior selection
 onevent prox
-	if alive!=0 then
-		callsub ACTION_SELECTION
-	end
-
-sub ACTION_SELECTION
-	# Robot behaviour controller goes here
-	# Motivation architecture
-	
-	callsub reset_motors
-	callsub reset_leds
-	
-	callsub behaviour_explore
-	callsub behaviour_retreat
-	callsub behaviour_avoid
-	callsub behaviour_look_for_food
-	callsub behaviour_look_for_heat
-#
-# Individual behaviours
-#
-
-sub behaviour_explore
-	callsub behaviour_forward
-	timer.period[1] = RANDOM_WALK_TICKS
-return
-		
-sub behaviour_avoid
-	# Use the vector dot product to calculate motor values
-	call math.dot(mot_l, avoid_l, prox.horizontal[0:4], avoid_shift)
-	mot_l += avoid_offset
-	call math.dot(mot_r, avoid_r, prox.horizontal[0:4], avoid_shift)
-	mot_r += avoid_offset
-
-	# If motor values are &amp;lt; -MAX_SPEED or > +MAX_SPEED fix them
-	call math.clamp(mot_l, -SPEED, mot_l, SPEED)
-	call math.clamp(mot_r, -SPEED, mot_r, SPEED)
-
-	# Write calculated motor values to Thymio variables to run motors
-	motor.left.target = mot_l
-	motor.right.target = mot_r
-
-		
-sub behaviour_look_for_food
-	if prox.ground.delta[0] > FOOD_THRESHOLD_LOWER and prox.ground.delta[0] &lt; FOOD_THRESHOLD_UPPER or prox.ground.delta[1] > FOOD_THRESHOLD_LOWER and prox.ground.delta[1] &lt; FOOD_THRESHOLD_UPPER then 
-		callsub behaviour_eat	
-	else
-		callsub behaviour_explore	
-	end	
-	
-sub behaviour_look_for_heat
-	if prox.ground.delta[0] > HEAT_THRESHOLD_LOWER and prox.ground.delta[0] &lt; HEAT_THRESHOLD_UPPER or prox.ground.delta[1] > HEAT_THRESHOLD_LOWER and prox.ground.delta[1] &lt; HEAT_THRESHOLD_UPPER then
-		callsub behaviour_warmup
-	else
-		callsub behaviour_explore	
-	end
-	
-sub behaviour_eat
-	if prox.ground.delta[0] > FOOD_THRESHOLD_LOWER and prox.ground.delta[0] &lt; FOOD_THRESHOLD_UPPER or prox.ground.delta[1] > FOOD_THRESHOLD_LOWER and prox.ground.delta[1] &lt; FOOD_THRESHOLD_UPPER then
-		callsub reset_motors
-		call leds.top(0,32,0)
-		energy += ENERGY_INTAKE_PER_SE/10 # 10 because called at 10Hz
-		if  energy > MAX_ENERGY then	
-			energy = MAX_ENERGY
-			callsub behaviour_explore
-		end
-	end
-
-sub behaviour_warmup
-	if prox.ground.delta[0] > HEAT_THRESHOLD_LOWER and prox.ground.delta[0] &lt; HEAT_THRESHOLD_UPPER or prox.ground.delta[1] > HEAT_THRESHOLD_LOWER and prox.ground.delta[1] &lt; HEAT_THRESHOLD_UPPER then # food present
-		callsub reset_motors
-		call leds.top(255,126,0)
-		mTemperature += TEMPERATURE_RISE_PER_SE/10
-		callsub reset_motors
-		if  mTemperature > MAX_TEMPERATURE then	
-			mTemperature = MAX_TEMPERATURE
-			callsub behaviour_explore
-		end
-	end
-
-sub behaviour_retreat
 	max_sval = prox.horizontal[0]
 	max_sval_i = 0
 
@@ -196,19 +121,149 @@ sub behaviour_retreat
 			max_sval_i = i # record index of new max val
 		end
 	end
-	if max_sval > PERSONAL_SPACE then
-		state = STATE_RETREAT
-		timer.period[1] = 4000
-	end
 	
-onevent timer1
-	if  state == STATE_RETREAT then
-		callsub behaviour_reverse
-		state = 0
-	else
-		callsub behaviour_rand_turn
+	if alive!=0 then
+		callsub ACTION_SELECTION
 	end
 
+sub ACTION_SELECTION
+	# Robot behaviour controller goes here
+	# Motivation architecture
+
+	energy_deficit = MAX_ENERGY - energy
+	temperature_deficit = MAX_TEMPERATURE - temper
+	
+	# Motivation = deficit + (deficit . stimulus)
+	motivation_hunger = energy_deficit + (energy_deficit * stimulus_food)
+	motivation_cold = temperature_deficit + (temperature_deficit * stimulus_heat )
+	
+	callsub reset_motors
+	callsub reset_leds
+	
+	# Default behaviour
+	#callsub behaviour_explore
+	
+	callsub behaviour_forward	
+	
+	if max_sval >= PERSONAL_SPACE then
+		callsub behaviour_avoid
+	end
+			
+	if motivation_hunger > ENGERGY_DANGER_LIMIT and prox.ground.delta[0] > FOOD_THRESHOLD_LOWER and prox.ground.delta[0] &lt; FOOD_THRESHOLD_UPPER or prox.ground.delta[1] > FOOD_THRESHOLD_LOWER and prox.ground.delta[1] &lt; FOOD_THRESHOLD_UPPER then
+		callsub behaviour_go_to_food	
+	else
+		# callsub behaviour_go_to_heat	
+	end
+	
+	
+	#callsub behaviour_avoid
+	#callsub behaviour_go_to_food
+	#callsub behaviour_go_to_heat
+	
+	#callsub behaviour_retreat
+
+#
+# Individual behaviours
+#
+# AVOID-OBSTACLE		motor.right.target = mot_r
+    # Braitenberg obstacle avoidance
+sub behaviour_avoid
+    if speed >0 then
+        call math.dot(temp_braitenberg, prox.horizontal[0:4],
+            weights_braitenberg, 4)
+        call math.dot(temp_braitenberg_turn, prox.horizontal[0:4],
+            weights_braitenberg_turn, 4)
+        call math.muldiv(temp_braitenberg_left, speed,
+            temp_braitenberg + temp_braitenberg_turn, 125)
+        call math.muldiv(temp_braitenberg_right, speed,
+            temp_braitenberg - temp_braitenberg_turn, 125)
+        motor.left.target = speed - temp_braitenberg_left
+        motor.right.target = speed - temp_braitenberg_right
+    elseif speed &lt; 0 then
+        temp_braitenberg = -300 / speed
+        motor.left.target = speed + prox.horizontal[6] / temp_braitenberg
+        motor.right.target = speed + prox.horizontal[5] / temp_braitenberg
+    end
+    # Saturation of left and right speed
+    call math.min(motor.left.target, motor.left.target, vmax)
+    call math.max(motor.left.target, motor.left.target, vmin)
+    call math.min(motor.right.target, motor.right.target, vmax)
+    call math.max(motor.right.target, motor.right.target, vmin)
+ 
+    # Table border detection
+    if prox.ground.reflected[0] &lt; 130 or prox.ground.reflected[1] &lt; 130 then 
+        motor.left.target = 0
+        motor.right.target = 0
+        call leds.bottom.left(32, 0, 0)
+        call leds.bottom.right(32, 0, 0)
+    else
+        call leds.bottom.left(0, 0, 0)
+        call leds.bottom.right(0, 0, 0)
+    end
+	
+# EXPLORE	
+sub behaviour_explore
+	callsub behaviour_forward
+	#timer.period[1] = RANDOM_WALK_TICKS
+return
+
+# FIND FOOD		
+sub behaviour_go_to_food
+	call leds.top(0,32,0)
+	if prox.ground.delta[0] > FOOD_THRESHOLD_LOWER and prox.ground.delta[0] &lt; FOOD_THRESHOLD_UPPER or prox.ground.delta[1] > FOOD_THRESHOLD_LOWER and prox.ground.delta[1] &lt; FOOD_THRESHOLD_UPPER then 
+		callsub behaviour_eat	
+	else
+		callsub behaviour_explore	
+	end	
+	
+# EAT	
+sub behaviour_eat
+	if prox.ground.delta[0] > FOOD_THRESHOLD_LOWER and prox.ground.delta[0] &lt; FOOD_THRESHOLD_UPPER or prox.ground.delta[1] > FOOD_THRESHOLD_LOWER and prox.ground.delta[1] &lt; FOOD_THRESHOLD_UPPER then
+		call leds.top(0,32,0)
+		callsub reset_motors
+		energy += ENERGY_INTAKE_PER_SE # 10 because called at 10Hz
+		if  energy > MAX_ENERGY then	
+			energy = MAX_ENERGY
+		end
+	end
+
+# FIND HEAT
+sub behaviour_go_to_heat
+	call leds.top(255,126,0)
+	if prox.ground.delta[0] > HEAT_THRESHOLD_LOWER and prox.ground.delta[0] &lt; HEAT_THRESHOLD_UPPER or prox.ground.delta[1] > HEAT_THRESHOLD_LOWER and prox.ground.delta[1] &lt; HEAT_THRESHOLD_UPPER then
+		callsub behaviour_warmup
+	else
+		callsub behaviour_explore	
+	end
+
+
+
+# WARMUP
+sub behaviour_warmup
+	if prox.ground.delta[0] > HEAT_THRESHOLD_LOWER and prox.ground.delta[0] &lt; HEAT_THRESHOLD_UPPER or prox.ground.delta[1] > HEAT_THRESHOLD_LOWER and prox.ground.delta[1] &lt; HEAT_THRESHOLD_UPPER then # food present
+		call leds.top(255,126,0)
+		callsub reset_motors
+		temper += TEMPERATURE_RISE_PER_SE
+		if  temper > MAX_TEMPERATURE then	
+			temper = MAX_TEMPERATURE
+		end
+	end
+
+# GO-TOWARDS-ENEMY
+sub behaviour_go_towards_enemy
+
+# FIGHT
+sub behaviour_fight
+
+# RUN-AWAY
+sub behaviour_run_way
+
+	
+
+onevent timer1
+	if alive > 0 then
+		callsub behaviour_random_turn
+	end
 
 #
 # Basic Actuators Behaviours
@@ -229,7 +284,7 @@ sub behaviour_reverse
 	motor.left.target = -SPEED
 	motor.right.target = -SPEED
 
-sub behaviour_rand_turn	
+sub behaviour_random_turn	
 	call math.rand(i)
 	if  i > -1 then
 		callsub behaviour_turn_right

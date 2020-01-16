@@ -12,9 +12,11 @@
 	<!-- World - a walled rectangular area with width (w) & height (h) in cm -->
 	<world w="100" h="100" color="light grey" groundTexture="environment1.png" />
 
-
+	<wall x="28" y="40" l1="15" l2="15" h="7" color="light grey"/>
+	<wall x="65" y="60" l1="15" l2="15" h="7" color="light grey"/>
+	 
 	<cylinder x="50.00" y="35.00" r="2.00" h="4.00" color="grey" mass="1.01"/>
-	
+
 	<!-- Camera - defined by x, y, altitude in cm; yaw, pitch in radians -->
 	<camera x="70" y="-60" altitude="110" yaw="1.57" pitch="-0.8" />
 
