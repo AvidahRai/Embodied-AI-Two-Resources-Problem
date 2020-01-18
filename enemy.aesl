@@ -1,0 +1,186 @@
+<!DOCTYPE aesl-source>
+<network>
+
+
+<!--list of global events-->
+
+
+<!--list of constants-->
+<constant value="500" name="SPEED"/>
+<constant value="1" name="MAX_VIEW_THRES"/>
+<constant value="1500" name="NEAR_VIEW_THRES"/>
+<constant value="200" name="RANDOM_WALK_TICKS"/>
+<constant value="4000" name="PERSONAL_SPACE_THRES"/>
+
+
+<!--show keywords state-->
+<keywords flag="true"/>
+
+
+<!--node thymio-II-->
+<node nodeId="2" name="thymio-II"># Overall metric
+
+# Define and initialise variables
+var state = 0
+var i
+
+# Behaviour dependent variables
+var selected_behaviour
+var left_sensor_fusion_val
+var right_sensor_fusion_val
+var middle_sensor_fusion_val
+var all_sensors_fusion_val
+
+
+# Actuator variables
+var max_sval # maximum sensor value
+var max_sval_i # index of maximum sensor val
+
+#
+# Initialize
+#
+callsub reset_leds
+callsub reset_motors
+
+sub reset_leds
+	call leds.top(0,0,0) # no light		
+
+sub reset_motors
+	motor.left.target = 0
+	motor.right.target = 0
+
+# Proximity sensor events control behavior selection
+onevent prox
+	max_sval = prox.horizontal[0]
+	max_sval_i = 0		
+	# Loop through the remaining front proximity sensors (1 to 4)
+	for i in 1:4 do
+		if prox.horizontal[i] > max_sval then
+			max_sval = prox.horizontal[i] # record new max val
+			max_sval_i = i # record index of new max val
+		end
+	end
+	
+	# Calculate Sensor fusion values
+	left_sensor_fusion_val  = prox.horizontal[0] + prox.horizontal[1] + prox.horizontal[2]
+	middle_sensor_fusion_val = prox.horizontal[1] + prox.horizontal[2] + prox.horizontal[3]
+	right_sensor_fusion_val = prox.horizontal[2] + prox.horizontal[3] + prox.horizontal[4]
+	all_sensors_fusion_val  = prox.horizontal[0] + prox.horizontal[1] + prox.horizontal[2] + prox.horizontal[3] + prox.horizontal[4]
+	
+	callsub behaviour_selection
+
+# 
+# Main Control Architecture based on "Action Selection Dynamics"
+#
+sub behaviour_selection
+	
+	# Reset behaviours
+	callsub reset_motors
+	callsub reset_leds
+	
+	if  max_sval > MAX_VIEW_THRES then 
+		callsub behaviour_approach
+	elseif max_sval > PERSONAL_SPACE_THRES then
+		if  motor.left.speed == 0 and motor.right.speed == 0 then
+			callsub behaviour_explore
+		else
+			callsub behaviour_avoid
+		end
+	else # CURIOUS	
+		callsub behaviour_explore
+	end
+	
+
+#
+# Individual behaviours
+#
+	
+# EXPLORE	
+sub behaviour_explore
+	selected_behaviour = 1
+	callsub behaviour_forward
+	timer.period[1] = RANDOM_WALK_TICKS
+
+
+# AVOID-OBSTACLE
+sub behaviour_avoid
+	selected_behaviour = 2
+	
+	if all_sensors_fusion_val >= 19000 then
+		# Stuck at corner
+		callsub behaviour_random_turn
+	elseif  left_sensor_fusion_val > right_sensor_fusion_val  then
+		callsub behaviour_turn_right
+	elseif right_sensor_fusion_val > left_sensor_fusion_val then
+		callsub behaviour_turn_left
+	end
+	
+
+
+# GO-TOWARDS-ENEMY
+sub behaviour_go_towards_enemy
+
+# FIGHT
+sub behaviour_fight
+
+# RUN-AWAY
+sub behaviour_run_way
+
+
+#
+# Basic Actuators Behaviours
+#
+sub behaviour_forward
+	motor.left.target += SPEED
+	motor.right.target += SPEED
+		
+sub behaviour_turn_left
+	motor.left.target -= SPEED * 3/5
+	motor.right.target += SPEED	* 3/5
+	
+sub behaviour_turn_right
+	motor.left.target += SPEED * 3/5
+	motor.right.target -= SPEED * 3/5
+
+sub behaviour_reverse
+	motor.left.target -= SPEED
+	motor.right.target -= SPEED
+
+sub behaviour_approach
+
+	if  middle_sensor_fusion_val > left_sensor_fusion_val and middle_sensor_fusion_val > right_sensor_fusion_val then
+		motor.left.target = SPEED 
+		motor.right.target = SPEED		
+	elseif  left_sensor_fusion_val > right_sensor_fusion_val  then
+		motor.left.target = -SPEED
+		motor.right.target = SPEED
+	elseif right_sensor_fusion_val > left_sensor_fusion_val then
+		motor.left.target = SPEED 
+		motor.right.target = -SPEED
+	end	
+
+sub behaviour_random_turn	
+	call math.rand(i)
+	if  i > -1 then
+		motor.left.target = -SPEED
+		motor.right.target = SPEED
+	else
+		motor.left.target = SPEED 
+		motor.right.target = -SPEED
+	end
+	
+
+# Timer0 controls physiology update
+onevent timer0
+		
+	
+	
+# Second Timer
+onevent timer1
+	callsub behaviour_random_turn
+
+
+</node>
+
+
+</network>
