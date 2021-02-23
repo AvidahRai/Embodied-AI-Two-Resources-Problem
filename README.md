@@ -1,7 +1,5 @@
-# thymio-two-resources-problem
+# Emobdied AI - Two resources problem
+
 Thymio Robotics - Aseba
 
-Two Resources problem
-
 Motivated architecture
-
